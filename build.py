@@ -2594,6 +2594,8 @@ if __name__ == "__main__":
             # If armnn_tflite backend, source from external repo for git clone
             if be == "armnn_tflite":
                 github_organization = "https://gitlab.com/arm-research/smarter/"
+            if be == "pytorch":
+                github_organization = "http://github.com/yongbinfeng"
             else:
                 github_organization = FLAGS.github_organization
 
