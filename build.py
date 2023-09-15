@@ -70,7 +70,7 @@ TRITON_VERSION_MAP = {
     '2.33.0': (
         '23.04',  # triton container
         '23.04',  # upstream container
-        '1.14.1',  # ORT
+        '1.15.1',  # ORT
         '2022.1.0',  # ORT OpenVINO
         '2022.1.0',  # Standalone OpenVINO
         '2.2.9',  # DCGM version
@@ -655,7 +655,7 @@ def onnxruntime_cmake_args(images, library_paths):
     if FLAGS.enable_gpu:
         cargs.append(
             cmake_backend_enable('onnxruntime',
-                                 'TRITON_ENABLE_ONNXRUNTIME_TENSORRT', True))
+                                 'TRITON_ENABLE_ONNXRUNTIME_TENSORRT', False))
 
     # If platform is jetpack do not use docker based build
     if target_platform() == 'jetpack':
@@ -695,12 +695,13 @@ def onnxruntime_cmake_args(images, library_paths):
                 cargs.append(
                     cmake_backend_enable('onnxruntime',
                                          'TRITON_ENABLE_ONNXRUNTIME_OPENVINO',
-                                         True))
+                                         False))
                 cargs.append(
                     cmake_backend_arg(
                         'onnxruntime',
                         'TRITON_BUILD_ONNXRUNTIME_OPENVINO_VERSION', None,
                         TRITON_VERSION_MAP[FLAGS.version][3]))
+    print("args: ", cargs)
 
     return cargs
 
@@ -1746,6 +1747,9 @@ def enable_all():
             'onnxruntime', 'python', 'dali', 'pytorch', 'openvino', 'fil',
             'tensorrt'
         ]
+        all_backends = ['pytorch']
+        all_backends = ['pytorch', 'tensorflow', 'onnxruntime']
+        all_backends = ['onnxruntime']
         all_repoagents = ['checksum']
         # DLIS-4491: Add redis cache to build
         all_caches = ['local']
@@ -2399,6 +2403,10 @@ if __name__ == '__main__':
             # If armnn_tflite backend, source from external repo for git clone
             if be == 'armnn_tflite':
                 github_organization = 'https://gitlab.com/arm-research/smarter/'
+            elif be == 'pytorch':
+                github_organization = 'https://github.com/yongbinfeng/'
+            elif be == 'onnxruntime':
+                github_organization = 'http://github.com/yongbinfeng/'
             else:
                 github_organization = FLAGS.github_organization
 
