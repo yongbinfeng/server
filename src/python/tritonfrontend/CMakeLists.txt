@@ -26,6 +26,9 @@
 
 cmake_minimum_required(VERSION 3.18)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # ================= Ensures Package is Structured Properly ==================
 # Top level module entry point and typed marker
 file(COPY __init__.py DESTINATION .)
@@ -116,6 +119,9 @@ target_link_libraries(
     py-bindings
     PRIVATE
     ${PY_BINDING_DEPENDENCY_LIBS}
+    triton-core-serverapi
+    triton-core-serverstub
+    triton-common-logging
 )
 
 if(${TRITON_ENABLE_HTTP})

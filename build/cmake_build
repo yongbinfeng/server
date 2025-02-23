@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+
+# 
+# Build script for Triton Inference Server
+# 
+
+# Exit script immediately if any command fails
+set -e
+set -x
+
+#scl enable gcc-toolset-9 bash
+
+########
+# Triton core library and tritonserver executable
+# 
+mkdir -p /tmp/tritonbuild/tritonserver/build
+cd /tmp/tritonbuild/tritonserver/build
+#cmake "-DTRT_VERSION=${TRT_VERSION}" "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}" "-DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_INSTALL_PREFIX:PATH=/tmp/tritonbuild/tritonserver/install" "-DTRITON_VERSION:STRING=2.53.0dev" "-DTRITON_REPO_ORGANIZATION:STRING=https://github.com/triton-inference-server" "-DTRITON_COMMON_REPO_TAG:STRING=r24.11" "-DTRITON_CORE_REPO_TAG:STRING=r24.11" "-DTRITON_BACKEND_REPO_TAG:STRING=r24.11" "-DTRITON_THIRD_PARTY_REPO_TAG:STRING=r24.11" "-DTRITON_ENABLE_LOGGING:BOOL=OFF" "-DTRITON_ENABLE_STATS:BOOL=OFF" "-DTRITON_ENABLE_METRICS:BOOL=OFF" "-DTRITON_ENABLE_METRICS_GPU:BOOL=OFF" "-DTRITON_ENABLE_METRICS_CPU:BOOL=OFF" "-DTRITON_ENABLE_TRACING:BOOL=OFF" "-DTRITON_ENABLE_NVTX:BOOL=OFF" "-DTRITON_ENABLE_GPU:BOOL=ON" "-DTRITON_MIN_COMPUTE_CAPABILITY=6.0" "-DTRITON_ENABLE_MALI_GPU:BOOL=OFF" "-DTRITON_ENABLE_GRPC:BOOL=OFF" "-DTRITON_ENABLE_HTTP:BOOL=OFF" "-DTRITON_ENABLE_SAGEMAKER:BOOL=OFF" "-DTRITON_ENABLE_VERTEX_AI:BOOL=OFF" "-DTRITON_ENABLE_GCS:BOOL=OFF" "-DTRITON_ENABLE_S3:BOOL=OFF" "-DTRITON_ENABLE_AZURE_STORAGE:BOOL=OFF" "-DTRITON_ENABLE_ENSEMBLE:BOOL=OFF" "-DTRITON_ENABLE_TENSORRT:BOOL=OFF" "-DPYTHON_EXECUTABLE=/usr/bin/python3" "-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON" /workspace
+cmake "-DTRT_VERSION=${TRT_VERSION}" "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}" "-DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_INSTALL_PREFIX:PATH=/tmp/tritonbuild/tritonserver/install" "-DTRITON_VERSION:STRING=2.53.0dev" "-DTRITON_REPO_ORGANIZATION:STRING=https://github.com/triton-inference-server" "-DTRITON_COMMON_REPO_TAG:STRING=r24.11" "-DTRITON_CORE_REPO_TAG:STRING=r24.11" "-DTRITON_BACKEND_REPO_TAG:STRING=r24.11" "-DTRITON_THIRD_PARTY_REPO_TAG:STRING=r24.11" "-DTRITON_ENABLE_LOGGING:BOOL=ON" "-DTRITON_ENABLE_STATS:BOOL=ON" "-DTRITON_ENABLE_METRICS:BOOL=ON" "-DTRITON_ENABLE_METRICS_GPU:BOOL=ON" "-DTRITON_ENABLE_METRICS_CPU:BOOL=ON" "-DTRITON_ENABLE_TRACING:BOOL=ON" "-DTRITON_ENABLE_NVTX:BOOL=OFF" "-DTRITON_ENABLE_GPU:BOOL=ON" "-DTRITON_MIN_COMPUTE_CAPABILITY=6.0" "-DTRITON_ENABLE_MALI_GPU:BOOL=OFF" "-DTRITON_ENABLE_GRPC:BOOL=ON" "-DTRITON_ENABLE_HTTP:BOOL=ON" "-DTRITON_ENABLE_SAGEMAKER:BOOL=OFF" "-DTRITON_ENABLE_VERTEX_AI:BOOL=OFF" "-DTRITON_ENABLE_GCS:BOOL=OFF" "-DTRITON_ENABLE_S3:BOOL=OFF" "-DTRITON_ENABLE_AZURE_STORAGE:BOOL=OFF" "-DTRITON_ENABLE_ENSEMBLE:BOOL=OFF" "-DTRITON_ENABLE_TENSORRT:BOOL=OFF" "-DPYTHON_EXECUTABLE=/usr/bin/python3" "-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON" /workspace
+cmake --build . --config Release -j80 -v -t install
+mkdir -p /tmp/tritonbuild/install/bin
+cp /tmp/tritonbuild/tritonserver/install/bin/tritonserver /tmp/tritonbuild/install/bin
+mkdir -p /tmp/tritonbuild/install/lib64
+cp /tmp/tritonbuild/tritonserver/install/lib64/libtritonserver.so /tmp/tritonbuild/install/lib64
+mkdir -p /tmp/tritonbuild/install/python
+cp /tmp/tritonbuild/tritonserver/install/python/triton*.whl /tmp/tritonbuild/install/python
+mkdir -p /tmp/tritonbuild/install/include/triton
+cp -r /tmp/tritonbuild/tritonserver/install/include/triton/core /tmp/tritonbuild/install/include/triton/core
+cp /workspace/LICENSE /tmp/tritonbuild/install
+cp /workspace/TRITON_VERSION /tmp/tritonbuild/install
+mkdir -p /tmp/tritonbuild/install/third-party-src
+cd /tmp/tritonbuild/tritonserver/build
+tar zcf /tmp/tritonbuild/install/third-party-src/src.tar.gz third-party-src
+cp /workspace/docker/README.third-party-src /tmp/tritonbuild/install/third-party-src/README
+# 
+# end Triton core library and tritonserver executable
+########
+
+########
+# 'onnxruntime' backend
+# Delete this section to remove backend from build
+# 
+mkdir -p /tmp/tritonbuild
+cd /tmp/tritonbuild
+rm -fr onnxruntime
+if [[ ! -e onnxruntime ]]; then
+  git clone --recursive --single-branch --depth=1 -b r24.11 https://github.com/yongbinfeng/onnxruntime_backend.git onnxruntime;
+fi
+mkdir -p /tmp/tritonbuild/onnxruntime/build
+cd /tmp/tritonbuild/onnxruntime/build
+cmake "-DTRT_VERSION=${TRT_VERSION}" "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}" "-DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}" "-DTRITON_BUILD_ONNXRUNTIME_VERSION=1.19.2" "-DTRITON_ENABLE_ONNXRUNTIME_TENSORRT:BOOL=OFF" "-DTRITON_BUILD_CONTAINER_VERSION=24.12dev" "-DTRITON_BUILD_TARGET_PLATFORM=rhel" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_INSTALL_PREFIX:PATH=/tmp/tritonbuild/onnxruntime/install" "-DTRITON_REPO_ORGANIZATION:STRING=https://github.com/triton-inference-server" "-DTRITON_COMMON_REPO_TAG:STRING=r24.11" "-DTRITON_CORE_REPO_TAG:STRING=r24.11" "-DTRITON_BACKEND_REPO_TAG:STRING=r24.11" "-DTRITON_ENABLE_GPU:BOOL=ON" "-DTRITON_ENABLE_MALI_GPU:BOOL=OFF" "-DTRITON_ENABLE_STATS:BOOL=OFF" "-DTRITON_ENABLE_METRICS:BOOL=OFF" "-DTRITON_ENABLE_MEMORY_TRACKER:BOOL=ON" ..
+cmake --build . --config Release -j80 -v -t install
+mkdir -p /tmp/tritonbuild/install/backends
+rm -fr /tmp/tritonbuild/install/backends/onnxruntime
+cp -r /tmp/tritonbuild/onnxruntime/install/backends/onnxruntime /tmp/tritonbuild/install/backends
+
+# 
+# end 'onnxruntime' backend
+########
+
+########
+# 'python' backend
+# Delete this section to remove backend from build
+# 
+mkdir -p /tmp/tritonbuild
+cd /tmp/tritonbuild
+rm -fr python
+if [[ ! -e python ]]; then
+  git clone --recursive --single-branch --depth=1 -b r24.11 https://github.com/triton-inference-server/python_backend.git python;
+fi
+mkdir -p /tmp/tritonbuild/python/build
+cd /tmp/tritonbuild/python/build
+cmake "-DTRT_VERSION=${TRT_VERSION}" "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}" "-DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}" "-DPYBIND11_PYTHON_VERSION:STRING=3.12.3" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_INSTALL_PREFIX:PATH=/tmp/tritonbuild/python/install" "-DTRITON_REPO_ORGANIZATION:STRING=https://github.com/triton-inference-server" "-DTRITON_COMMON_REPO_TAG:STRING=r24.11" "-DTRITON_CORE_REPO_TAG:STRING=r24.11" "-DTRITON_BACKEND_REPO_TAG:STRING=r24.11" "-DTRITON_ENABLE_GPU:BOOL=ON" "-DTRITON_ENABLE_MALI_GPU:BOOL=OFF" "-DTRITON_ENABLE_STATS:BOOL=OFF" "-DTRITON_ENABLE_METRICS:BOOL=OFF" "-DTRITON_ENABLE_MEMORY_TRACKER:BOOL=ON" ..
+cmake --build . --config Release -j80 -v -t install
+mkdir -p /tmp/tritonbuild/install/backends
+rm -fr /tmp/tritonbuild/install/backends/python
+cp /usr/lib64/libpython3.12* /tmp/tritonbuild/python/install/backends/python
+cp -r /tmp/tritonbuild/python/install/backends/python /tmp/tritonbuild/install/backends
+# 
+# end 'python' backend
+########
+
+########
+# 'checksum' repository agent
+# Delete this section to remove repository agent from build
+# 
+mkdir -p /tmp/tritonbuild
+cd /tmp/tritonbuild
+rm -fr checksum
+if [[ ! -e checksum ]]; then
+  git clone --recursive --single-branch --depth=1 -b r24.11 https://github.com/triton-inference-server/checksum_repository_agent.git checksum;
+fi
+mkdir -p /tmp/tritonbuild/checksum/build
+cd /tmp/tritonbuild/checksum/build
+cmake "-DTRT_VERSION=${TRT_VERSION}" "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}" "-DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_INSTALL_PREFIX:PATH=/tmp/tritonbuild/checksum/install" "-DTRITON_REPO_ORGANIZATION:STRING=https://github.com/triton-inference-server" "-DTRITON_COMMON_REPO_TAG:STRING=r24.11" "-DTRITON_CORE_REPO_TAG:STRING=r24.11" "-DTRITON_ENABLE_GPU:BOOL=ON" ..
+cmake --build . --config Release -j80 -v -t install
+mkdir -p /tmp/tritonbuild/install/repoagents
+rm -fr /tmp/tritonbuild/install/repoagents/checksum
+cp -r /tmp/tritonbuild/checksum/install/repoagents/checksum /tmp/tritonbuild/install/repoagents
+# 
+# end 'checksum' repository agent
+########
+
+########
+# 'tensorflow' backend
+# Delete this section to remove backend from build
+# 
+mkdir -p /tmp/tritonbuild
+cd /tmp/tritonbuild
+rm -fr tensorflow
+if [[ ! -e tensorflow ]]; then
+  git clone --recursive --single-branch --depth=1 -b r24.11 https://github.com/yongbinfeng/tensorflow_backend.git tensorflow;
+fi
+mkdir -p /tmp/tritonbuild/tensorflow/build
+cd /tmp/tritonbuild/tensorflow/build
+cmake "-DTRT_VERSION=${TRT_VERSION}" "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}" "-DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}" "-DTRITON_TENSORFLOW_DOCKER_IMAGE=buildbase_tf2" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_INSTALL_PREFIX:PATH=/tmp/tritonbuild/tensorflow/install" "-DTRITON_REPO_ORGANIZATION:STRING=https://github.com/triton-inference-server" "-DTRITON_COMMON_REPO_TAG:STRING=r24.11" "-DTRITON_CORE_REPO_TAG:STRING=r24.11" "-DTRITON_BACKEND_REPO_TAG:STRING=r24.11" "-DTRITON_ENABLE_GPU:BOOL=ON" "-DTRITON_ENABLE_MALI_GPU:BOOL=OFF" "-DTRITON_ENABLE_STATS:BOOL=ON" "-DTRITON_ENABLE_METRICS:BOOL=ON" "-DTRITON_ENABLE_MEMORY_TRACKER:BOOL=ON" ..
+cmake --build . --config Release -j80 -v -t install
+mkdir -p /tmp/tritonbuild/install/backends
+rm -fr /tmp/tritonbuild/install/backends/tensorflow
+cp -r /tmp/tritonbuild/tensorflow/install/backends/tensorflow /tmp/tritonbuild/install/backends
+# 
+# end 'tensorflow' backend
+########
+
+########
+# 'pytorch' backend
+# Delete this section to remove backend from build
+# 
+mkdir -p /tmp/tritonbuild
+cd /tmp/tritonbuild
+rm -fr pytorch
+if [[ ! -e pytorch ]]; then
+  git clone --recursive --single-branch --depth=1 -b r24.11 https://github.com/yongbinfeng/pytorch_backend.git pytorch;
+fi
+mkdir -p /tmp/tritonbuild/pytorch/build
+cd /tmp/tritonbuild/pytorch/build
+cmake "-DTRT_VERSION=${TRT_VERSION}" "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}" "-DVCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}" "-DTRITON_PYTORCH_DOCKER_IMAGE=buildbase_pt" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_INSTALL_PREFIX:PATH=/tmp/tritonbuild/pytorch/install" "-DTRITON_REPO_ORGANIZATION:STRING=https://github.com/triton-inference-server" "-DTRITON_COMMON_REPO_TAG:STRING=r24.11" "-DTRITON_CORE_REPO_TAG:STRING=r24.11" "-DTRITON_BACKEND_REPO_TAG:STRING=r24.11" "-DTRITON_ENABLE_GPU:BOOL=ON" "-DTRITON_ENABLE_MALI_GPU:BOOL=OFF" "-DTRITON_ENABLE_STATS:BOOL=ON" "-DTRITON_ENABLE_METRICS:BOOL=ON" "-DTRITON_ENABLE_MEMORY_TRACKER:BOOL=ON" ..
+cmake --build . --config Release -j80 -v -t install
+mkdir -p /tmp/tritonbuild/install/backends
+rm -fr /tmp/tritonbuild/install/backends/pytorch
+cp -r /tmp/tritonbuild/pytorch/install/backends/pytorch /tmp/tritonbuild/install/backends
+# 
+# end 'pytorch' backend
+########
+
+
+
+########
+# Collect Triton CI artifacts
+# 
+mkdir -p /tmp/tritonbuild/ci
+cp -r /workspace/qa /tmp/tritonbuild/ci
+cp -r /workspace/deploy /tmp/tritonbuild/ci
+mkdir -p /tmp/tritonbuild/ci/docs
+cp -r /workspace/docs/examples /tmp/tritonbuild/ci/docs
+mkdir -p /tmp/tritonbuild/ci/src/test
+cp -r /workspace/src/test/models /tmp/tritonbuild/ci/src/test
+cp -r /tmp/tritonbuild/tritonserver/install/bin /tmp/tritonbuild/ci
+mkdir -p /tmp/tritonbuild/ci/lib
+cp /tmp/tritonbuild/tritonserver/install/lib/libtritonrepoagent_relocation.so /tmp/tritonbuild/ci/lib
+cp -r /tmp/tritonbuild/tritonserver/install/python /tmp/tritonbuild/ci
+mkdir -p /tmp/tritonbuild/ci/backends
+if [[ -e /tmp/tritonbuild/identity/install/backends/identity ]]; then
+cp -r /tmp/tritonbuild/identity/install/backends/identity /tmp/tritonbuild/ci/backends
+fi
+if [[ -e /tmp/tritonbuild/repeat/install/backends/repeat ]]; then
+cp -r /tmp/tritonbuild/repeat/install/backends/repeat /tmp/tritonbuild/ci/backends
+fi
+if [[ -e /tmp/tritonbuild/square/install/backends/square ]]; then
+cp -r /tmp/tritonbuild/square/install/backends/square /tmp/tritonbuild/ci/backends
+fi
+mkdir -p /tmp/tritonbuild/ci/tritonbuild/tritonserver/backends
+if [[ -e /tmp/tritonbuild/tritonserver/install/backends/query ]]; then
+cp -r /tmp/tritonbuild/tritonserver/install/backends/query /tmp/tritonbuild/ci/tritonbuild/tritonserver/backends
+fi
+if [[ -e /tmp/tritonbuild/tritonserver/install/backends/implicit_state ]]; then
+cp -r /tmp/tritonbuild/tritonserver/install/backends/implicit_state /tmp/tritonbuild/ci/tritonbuild/tritonserver/backends
+fi
+if [[ -e /tmp/tritonbuild/tritonserver/install/backends/sequence ]]; then
+cp -r /tmp/tritonbuild/tritonserver/install/backends/sequence /tmp/tritonbuild/ci/tritonbuild/tritonserver/backends
+fi
+if [[ -e /tmp/tritonbuild/tritonserver/install/backends/dyna_sequence ]]; then
+cp -r /tmp/tritonbuild/tritonserver/install/backends/dyna_sequence /tmp/tritonbuild/ci/tritonbuild/tritonserver/backends
+fi
+if [[ -e /tmp/tritonbuild/tritonserver/install/backends/distributed_addsub ]]; then
+cp -r /tmp/tritonbuild/tritonserver/install/backends/distributed_addsub /tmp/tritonbuild/ci/tritonbuild/tritonserver/backends
+fi
+if [[ -e /tmp/tritonbuild/tritonserver/install/backends/iterative_sequence ]]; then
+cp -r /tmp/tritonbuild/tritonserver/install/backends/iterative_sequence /tmp/tritonbuild/ci/tritonbuild/tritonserver/backends
+fi
+mkdir -p /tmp/tritonbuild/ci/tritonbuild
+rm -fr /tmp/tritonbuild/python/build
+rm -fr /tmp/tritonbuild/python/install
+cp -r /tmp/tritonbuild/python /tmp/tritonbuild/ci/tritonbuild
+# 
+# end Triton CI artifacts
+########
+
+chmod -R a+rw /tmp/tritonbuild/install
+chmod -R a+rw /tmp/tritonbuild/ci

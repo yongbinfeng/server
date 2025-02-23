@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+# 
+# Docker-based build script for Triton Inference Server
+# 
+
+# Exit script immediately if any command fails
+set -e
+set -x
+
+########
+# Create Triton base build image
+# This image contains all dependencies necessary to build Triton
+# 
+cd /storage/local/data1/home/yfeng/RHELTest/server
+docker build -t tritonserver_buildbase -f /storage/local/data1/home/yfeng/RHELTest/server/build/Dockerfile.buildbase --pull --cache-from=tritonserver_buildbase --cache-from=tritonserver_buildbase_cache0 --cache-from=tritonserver_buildbase_cache1 . 
+
+########
+# Run build in tritonserver_buildbase container
+# Mount a directory into the container where the install
+# artifacts will be placed.
+# 
+if [ "$(docker ps -a | grep tritonserver_builder)" ]; then  docker rm -f tritonserver_builder; fi
+docker run -w /workspace/build --name tritonserver_builder -it -v /var/run/docker.sock:/var/run/docker.sock tritonserver_buildbase ./cmake_build 
+docker cp tritonserver_builder:/tmp/tritonbuild/install /storage/local/data1/home/yfeng/RHELTest/server/build 
+docker cp tritonserver_builder:/tmp/tritonbuild/ci /storage/local/data1/home/yfeng/RHELTest/server/build 
+
+########
+# Create final tritonserver image
+# 
+cd /storage/local/data1/home/yfeng/RHELTest/server
+docker build -t tritonserver -f /storage/local/data1/home/yfeng/RHELTest/server/build/Dockerfile . 
+
+########
+# Create CI base image
+# 
+cd /storage/local/data1/home/yfeng/RHELTest/server
+docker build -t tritonserver_cibase -f /storage/local/data1/home/yfeng/RHELTest/server/build/Dockerfile.cibase . 
