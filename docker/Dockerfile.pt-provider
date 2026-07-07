@@ -1,0 +1,46 @@
+# libtorch provider image for the RHEL PyTorch backend build (CPU or GPU).
+#
+# The Triton PyTorch backend does not build libtorch from source -- it pulls a
+# "provider" image and `docker cp`s prebuilt libtorch libraries out of it. Its
+# RHEL path expects a manylinux layout under /opt/_internal/cpython-3.12.1. The
+# public nvcr.io/nvidia/pytorch image is Ubuntu 24.04 (glibc 2.39) and will not
+# load on a Rocky 9 runtime (glibc 2.34), so this image lays out a stock PyPI
+# (manylinux, glibc ~2.28) torch wheel at the expected paths.
+#
+# CPU:
+#   docker build -t triton-pt-provider:cpu -f docker/Dockerfile.pt-provider .
+# GPU (CUDA 13 -- use the cu130 wheels so the bundled CUDA matches the base):
+#   docker build -t triton-pt-provider:gpu \
+#     --build-arg TORCH_SPEC=torch==2.9.1+cu130 \
+#     --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu130 \
+#     -f docker/Dockerfile.pt-provider .
+#
+# Pair with the pytorch_backend fork (rhel-build-support branch). See
+# docs/build_rhel.md.
+
+FROM nvidia/cuda:13.0.0-devel-rockylinux9
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+ARG TORCH_SPEC=torch==2.8.0+cpu
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
+
+RUN dnf install -y python3.12 python3.12-pip libjpeg-turbo libpng && dnf clean all
+
+ENV PTROOT=/opt/_internal/cpython-3.12.1
+RUN mkdir -p ${PTROOT}/lib/python3.12/site-packages \
+ && python3.12 -m pip install --no-cache-dir --target ${PTROOT}/lib/python3.12/site-packages \
+      "${TORCH_SPEC}" --index-url "${TORCH_INDEX}"
+
+# For GPU wheels, torch bundles its own CUDA runtime under site-packages/nvidia/*/lib.
+# Flatten those into torch/lib so the backend extraction (which copies from
+# torch/lib) picks them up; the backend rpaths everything to $ORIGIN. This is a
+# no-op for CPU wheels (no bundled nvidia libs).
+RUN SP=${PTROOT}/lib/python3.12/site-packages \
+ && cp -a $SP/nvidia/*/lib/*.so* $SP/torch/lib/ 2>/dev/null || true \
+ && cd ${PTROOT}/lib && for f in python3.12/site-packages/torch/lib/*.so*; do ln -sf "$f" .; done
+
+# Source bits the backend extraction copies out of the provider image.
+RUN mkdir -p /opt/pytorch/pytorch/torch/csrc/jit \
+ && (cp ${PTROOT}/lib/python3.12/site-packages/torch*.dist-info/licenses/LICENSE /opt/pytorch/pytorch/LICENSE 2>/dev/null \
+     || echo "PyTorch is BSD-3-Clause licensed; see https://github.com/pytorch/pytorch/blob/main/LICENSE" > /opt/pytorch/pytorch/LICENSE) \
+ && cp -r ${PTROOT}/lib/python3.12/site-packages/torch/include/torch/csrc/jit/codegen \
+         /opt/pytorch/pytorch/torch/csrc/jit/codegen

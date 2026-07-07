@@ -89,6 +89,7 @@ EXTRA_CORE_CMAKE_FLAGS = {}
 OVERRIDE_CORE_CMAKE_FLAGS = {}
 EXTRA_BACKEND_CMAKE_FLAGS = {}
 OVERRIDE_BACKEND_CMAKE_FLAGS = {}
+OVERRIDE_BACKEND_REPO = {}
 
 THIS_SCRIPT_DIR = os.path.dirname(os.path.abspath(getsourcefile(lambda: 0)))
 
@@ -853,8 +854,10 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 CMAKE_POLICY_VERSION_MINIMUM=3.5
 """
     df += """
 # Install docker docker buildx
-RUN yum install -y ca-certificates curl gnupg yum-utils \\
-      && yum-config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo \\
+# --allowerasing is required because RHEL-family base images ship
+# curl-minimal, which conflicts with the full curl package.
+RUN yum install -y --allowerasing ca-certificates curl gnupg yum-utils \\
+      && dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo \\
       && yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 #   && yum install -y docker.io docker-buildx-plugin
 
@@ -863,7 +866,12 @@ RUN yum install -y ca-certificates curl gnupg yum-utils \\
 # python3-pip and libarchive-dev is needed by python backend
 # libxml2-dev is needed for Azure Storage
 # scons is needed for armnn_tflite backend build dep
-RUN yum install -y \\
+# EPEL and CRB (CodeReady Builder) repos provide gperftools-devel,
+# libb64-devel, python3-scons, rapidjson-devel and re2-devel, which are
+# not available in the default RHEL-family repositories.
+RUN yum install -y --allowerasing epel-release \\
+      && yum config-manager --set-enabled crb \\
+      && yum install -y \\
             autoconf \\
             automake \\
             bzip2-devel \\
@@ -1280,7 +1288,11 @@ RUN userdel tensorrt-server > /dev/null 2>&1 || true \\
     if target_platform() == "rhel":
         df += """
 # Common dependencies.
-RUN yum install -y \\
+# EPEL and CRB (CodeReady Builder) repos provide re2-devel, libb64-devel
+# and gperftools-devel, which are not in the default RHEL-family repos.
+RUN yum install -y --allowerasing epel-release \\
+      && yum config-manager --set-enabled crb \\
+      && yum install -y \\
         git \\
         gperf \\
         re2-devel \\
@@ -1293,7 +1305,9 @@ RUN yum install -y \\
         python3.12-pip \\
         numactl-devel
 
-RUN pip3 install patchelf==0.17.2
+# Use `python3.12 -m pip`: on a stock RHEL base `python3.12-pip` provides
+# pip3.12, not a bare `pip3` (which only appears later via pyenv).
+RUN python3.12 -m pip install patchelf==0.17.2
 
 """
     else:
@@ -1344,6 +1358,12 @@ ENV TCMALLOC_RELEASE_RATE 200
 
     if enable_gpu:
         df += install_dcgm_libraries(argmap["DCGM_VERSION"], target_machine)
+        # cuDNN runtime is required by the ONNXRuntime CUDA execution provider.
+        # The CUDA repo is already configured in the nvidia/cuda base image.
+        if target_platform() == "rhel" and "onnxruntime" in backends:
+            df += """
+RUN dnf install -y cudnn && dnf clean all
+"""
         # This segment will break the RHEL SBSA build. Need to determine whether
         # this is necessary to incorporate.
         if target_platform() != "rhel":
@@ -1362,10 +1382,18 @@ RUN ln -sf ${_CUDA_COMPAT_PATH}/lib.real ${_CUDA_COMPAT_PATH}/lib \\
         if target_platform() == "rhel":
             df += """
 # python3, python3-pip and some pip installs required for the python backend
+# libffi-devel (_ctypes), sqlite-devel (_sqlite3) and the bzip2/xz/zlib/ncurses
+# headers are required so the pyenv build below produces a complete CPython.
 RUN yum install -y \\
         libarchive-devel \\
         openssl-devel \\
-        readline-devel
+        readline-devel \\
+        libffi-devel \\
+        sqlite-devel \\
+        bzip2-devel \\
+        xz-devel \\
+        zlib-devel \\
+        ncurses-devel
 """
             # Requires openssl-devel to be installed first for pyenv build to be successful
             df += change_default_python_version_rhel(FLAGS.rhel_py_version)
@@ -1510,6 +1538,9 @@ COPY --from=min_container /usr/lib/{libs_arch}-linux-gnu/libnccl.so.2 /usr/lib/{
 
 
 def change_default_python_version_rhel(version):
+    # pyenv names the interpreter binary by major.minor (e.g. python3.12),
+    # not by the full patch version, so PYTHON_BIN_PATH must use major.minor.
+    major_minor_version = ".".join(version.split(".")[:2])
     df = f"""
 # The python library version available for install via 'yum install python3.X-devel' does not
 # match the version of python inside the RHEL base container. This means that python packages
@@ -1526,9 +1557,9 @@ RUN CONFIGURE_OPTS=\"--with-openssl=/usr/lib64\" && pyenv install {version} \\
 # to set the correct version, otherwise, packages that are
 # pip installed will not be found during testing.
 ENV PYVER={version} PYTHONPATH=/opt/python/v
-RUN ln -sf ${{PYENV_ROOT}}/versions/${{PYVER}}* ${{PYTHONPATH}}
+RUN mkdir -p /opt/python && ln -sf ${{PYENV_ROOT}}/versions/${{PYVER}}* ${{PYTHONPATH}}
 ENV PYBIN=${{PYTHONPATH}}/bin
-ENV PYTHON_BIN_PATH=${{PYBIN}}/python${{PYVER}} PATH=${{PYBIN}}:${{PATH}}
+ENV PYTHON_BIN_PATH=${{PYBIN}}/python{major_minor_version} PATH=${{PYBIN}}:${{PATH}}
 """
     return df
 
@@ -1694,7 +1725,12 @@ def create_docker_build_script(script_name, container_install_dir, container_ci_
         # wheel filenames. CUDA_VERSION is deliberately NOT forwarded -- the
         # container's own CUDA base image defines it; host CUDA may differ
         # (see core/python/build_wheel.py:_detect_cuda_version).
-        for var in ("CI_PIPELINE_ID", "NVIDIA_UPSTREAM_VERSION", "NVIDIA_BUILD_ID"):
+        for var in (
+            "CI_PIPELINE_ID",
+            "NVIDIA_UPSTREAM_VERSION",
+            "NVIDIA_BUILD_ID",
+            "CUDA_ARCH_LIST",
+        ):
             if os.environ.get(var):
                 runargs += ["-e", f"{var}={os.environ[var]}"]
 
@@ -1919,11 +1955,18 @@ def backend_build(
     cmake_script.comment()
     cmake_script.mkdir(build_dir)
     cmake_script.cwd(build_dir)
-    if be == "tensorrtllm":
-        repository_name = "TensorRT-LLM"
-        cmake_script.gitclone(repository_name, tag, be, github_organization)
-    else:
-        cmake_script.gitclone(backend_repo(be), tag, be, github_organization)
+    repository_name = "TensorRT-LLM" if be == "tensorrtllm" else backend_repo(be)
+    backend_org = github_organization
+    # Allow a single backend to be cloned from a fork by giving its full repo
+    # URL, without repointing every repo via --github-organization. gitclone
+    # builds "<org>/<repo>.git", so split the URL into those two parts (this
+    # also supports a fork whose repo was renamed).
+    if be in OVERRIDE_BACKEND_REPO:
+        repo_url = OVERRIDE_BACKEND_REPO[be]
+        if repo_url.endswith(".git"):
+            repo_url = repo_url[: -len(".git")]
+        backend_org, repository_name = repo_url.rsplit("/", 1)
+    cmake_script.gitclone(repository_name, tag, be, backend_org)
 
     if be == "tensorrtllm":
         tensorrtllm_prebuild(cmake_script)
@@ -2465,6 +2508,12 @@ if __name__ == "__main__":
         help='Include specified backend in build as <backend-name>[:<repo-tag>]. If <repo-tag> starts with "pull/" then it refers to a pull-request reference, otherwise <repo-tag> indicates the git tag/branch to use for the build. If the version is non-development then the default <repo-tag> is the release branch matching the container version (e.g. version YY.MM -> branch rYY.MM); otherwise the default <repo-tag> is "main" (e.g. version YY.MMdev -> branch main).',
     )
     parser.add_argument(
+        "--backend-repo",
+        action="append",
+        required=False,
+        help="Override the full git repo URL for a single backend as <backend-name>:<repo-url>. Useful for building a backend from a fork (e.g. onnxruntime:https://github.com/<user>/onnxruntime_backend) without repointing every other repo via --github-organization. A trailing '.git' is optional.",
+    )
+    parser.add_argument(
         "--repo-tag",
         action="append",
         required=False,
@@ -2590,6 +2639,8 @@ if __name__ == "__main__":
         FLAGS.repo_tag = []
     if FLAGS.backend is None:
         FLAGS.backend = []
+    if FLAGS.backend_repo is None:
+        FLAGS.backend_repo = []
     if FLAGS.endpoint is None:
         FLAGS.endpoint = []
     if FLAGS.filesystem is None:
@@ -2709,6 +2760,16 @@ if __name__ == "__main__":
             parts.append(default_repo_tag)
         log('backend "{}" at tag/branch "{}"'.format(parts[0], parts[1]))
         backends[parts[0]] = parts[1]
+
+    # Per-backend repo URL overrides (e.g. build a backend from a fork).
+    for bro in FLAGS.backend_repo:
+        parts = bro.split(":", 1)
+        fail_if(
+            len(parts) != 2,
+            "--backend-repo must specify <backend-name>:<repo-url>",
+        )
+        log('backend "{}" repo url "{}"'.format(parts[0], parts[1]))
+        OVERRIDE_BACKEND_REPO[parts[0]] = parts[1]
 
     if "vllm" in backends:
         if "python" not in backends:
